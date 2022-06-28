@@ -387,7 +387,35 @@ class VoxelNet(nn.Module):
                     for nuscenes, sample_token is saved in it.
             }
         """
+
+        total_scores_ = torch.sigmoid(preds_dict['cls_preds'])
+        top_scores_, top_labels_ = torch.max(
+                        total_scores_, dim=-1)
+
         batch_size = example['anchors'].shape[0]
+
+        scores_ = top_scores_.reshape((batch_size,-1))
+        labels_ = top_labels_.reshape((batch_size,-1))
+        box_preds_ = preds_dict['box_preds'].reshape((batch_size, -1, 7))
+
+        obj_type = np.array(example['type']).reshape(-1)
+        type_names = ['Car','Cyclist','Pedestrian']
+        obj_type = np.array(list(map(lambda x: type_names.index(x), obj_type)))
+
+        if "metadata" not in example or len(example["metadata"]) == 0:
+            meta_list = [None] * batch_size
+        else:
+            meta_list = example["metadata"]
+
+        #labels_ = 
+
+        print(scores_.shape)
+        print(labels_.shape)
+        print(box_preds_.shape)
+
+        ####################################################################
+
+
         if "metadata" not in example or len(example["metadata"]) == 0:
             meta_list = [None] * batch_size
         else:
@@ -614,9 +642,9 @@ class VoxelNet(nn.Module):
                     mask &= (final_box_preds[:, :3] <=
                              post_center_range[3:]).all(1)
                     predictions_dict = {
-                        "box3d_lidar": final_box_preds[mask],
-                        "scores": final_scores[mask],
-                        "label_preds": label_preds[mask],
+                        "box3d_lidar": final_box_preds[mask],#[0],
+                        "scores": final_scores[mask],#[0],
+                        "label_preds": label_preds[mask],#[0],
                         "metadata": meta,
                     }
                 else:
@@ -642,6 +670,7 @@ class VoxelNet(nn.Module):
                     meta,
                 }
             predictions_dicts.append(predictions_dict)
+        print(predictions_dicts[0].keys())
         return predictions_dicts
 
     def metrics_to_float(self):

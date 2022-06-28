@@ -88,7 +88,7 @@ def build(input_reader_config,
         global_random_rot_range=list(
             prep_cfg.global_random_rotation_range_per_object),
         global_translate_noise_std=list(prep_cfg.global_translate_noise_std),
-        db_sampler=db_sampler,
+        db_sampler=None,#db_sampler,
         num_point_features=dataset_cls.NumPointFeatures,
         anchor_area_threshold=prep_cfg.anchor_area_threshold,
         gt_points_drop=prep_cfg.groundtruth_points_drop_percentage,

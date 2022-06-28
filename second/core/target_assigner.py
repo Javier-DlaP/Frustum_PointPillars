@@ -97,7 +97,6 @@ class TargetAssigner:
         """this function assign target individally for each class.
         recommend for multi-class network.
         """
-
         def box_encoding_fn(boxes, anchors):
             return self._box_coder.encode(boxes, anchors)
 
@@ -116,14 +115,20 @@ class TargetAssigner:
                             dtype=np.bool_)
             feature_map_size = anchor_dict["anchors"].shape[:3]
             num_loc = anchor_dict["anchors"].shape[-2]
+            
+            #anchors_mask = None
             if anchors_mask is not None:
                 anchors_mask = anchors_mask.reshape(-1)
                 a_range = self.anchors_range(class_name)
+                # print("-------")
+                # print('mask'+str(sum(anchors_mask)))
+                # print(a_range)
                 anchors_mask_class = anchors_mask[a_range[0]:a_range[1]].reshape(-1)
+                # print('mask class'+str(sum(anchors_mask_class)))
                 prune_anchor_fn = lambda _: np.where(anchors_mask_class)[0]
             else:
                 prune_anchor_fn = None
-            # print(f"num of {class_name}:", np.sum(mask))
+                
             targets = create_target_np(
                 anchor_dict["anchors"].reshape(-1, self.box_ndim),
                 gt_boxes[mask],

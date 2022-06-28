@@ -297,7 +297,7 @@ def kitti_anno_to_label_file(annos, folder):
 def _read_imageset_file(path):
     with open(path, 'r') as f:
         lines = f.readlines()
-    return [int(line) for line in lines]
+    return [int(line.split('/')[-1][:-5]) for line in lines]
 
 
 def _calculate_num_points_in_gt(data_path,
@@ -342,10 +342,12 @@ def _calculate_num_points_in_gt(data_path,
 
 
 def create_kitti_info_file(data_path, save_path=None, relative_path=True):
-    imageset_folder = Path(__file__).resolve().parent / "ImageSets"
-    train_img_ids = _read_imageset_file(str(imageset_folder / "train.txt"))
-    val_img_ids = _read_imageset_file(str(imageset_folder / "val.txt"))
-    test_img_ids = _read_imageset_file(str(imageset_folder / "test.txt"))
+    #imageset_folder = Path(__file__).resolve().parent / "ImageSets"
+    imageset_folder = data_path + 'ImageSets/'
+    train_img_ids = _read_imageset_file(str(imageset_folder + "train.txt"))
+    val_img_ids = _read_imageset_file(str(imageset_folder + "val.txt"))
+    #test_img_ids = _read_imageset_file(str(imageset_folder / "test.txt"))
+    test_img_ids = []
 
     print("Generate info. this may take several minutes.")
     if save_path is None:

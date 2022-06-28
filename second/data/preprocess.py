@@ -245,7 +245,6 @@ def prep_pointcloud(input_dict,
                     masks = box_np_ops.points_in_rbbox(points,
                                                        sampled_gt_boxes)
                     points = points[np.logical_not(masks.any(-1))]
-
                 points = np.concatenate([sampled_points, points], axis=0)
         pc_range = voxel_generator.point_cloud_range
         group_ids = None
@@ -292,7 +291,6 @@ def prep_pointcloud(input_dict,
     if shuffle_points:
         # shuffle is a little slow.
         np.random.shuffle(points)
-
     # [0, -40, -3, 70.4, 40, 1]
     voxel_size = voxel_generator.voxel_size
     pc_range = voxel_generator.point_cloud_range
@@ -320,6 +318,8 @@ def prep_pointcloud(input_dict,
         'coordinates': coordinates,
         "num_voxels": num_voxels,
         "metrics": metrics,
+        
+        "type": input_dict["lidar"]["annotations"]['names'],
     }
     if calib is not None:
         example["calib"] = calib

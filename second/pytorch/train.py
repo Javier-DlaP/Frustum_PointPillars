@@ -521,7 +521,8 @@ def evaluate(config_path,
             torch.cuda.synchronize()
             prep_example_times.append(time.time() - t1)
         with torch.no_grad():
-            detections += net(example)
+            detection = net(example)
+            detections += detection
         bar.print_bar()
         if measure_time:
             t2 = time.time()

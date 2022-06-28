@@ -67,6 +67,9 @@ def create_target_np(all_anchors,
     Returns:
         labels, bbox_targets, bbox_outside_weights
     """
+    #############################
+    #prune_anchor_fn = None
+    #############################
     total_anchors = all_anchors.shape[0]
     if prune_anchor_fn is not None:
         inds_inside = prune_anchor_fn(all_anchors)

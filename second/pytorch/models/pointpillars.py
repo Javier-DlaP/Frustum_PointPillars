@@ -234,7 +234,8 @@ class PillarFeatureNet(nn.Module):
         for pfn in self.pfn_layers:
             features = pfn(features)
 
-        return features.squeeze()
+        #return features.squeeze()
+        return features.reshape(-1,features.shape[2])
 
 @register_vfe
 class PillarFeatureNetRadius(nn.Module):

@@ -11,7 +11,6 @@ from second.pytorch.builder import box_coder_builder, second_builder
 from second.pytorch.models.voxelnet import VoxelNet
 from second.pytorch.train import predict_to_kitti_label, example_convert_to_torch
 
-
 class TorchInferenceContext(InferenceContext):
     def __init__(self):
         super().__init__()
