@@ -17,6 +17,7 @@ from second.utils.timer import simple_timer
 
 import seaborn as sns
 import matplotlib.pyplot as plt 
+import time
 
 def merge_second_batch(batch_list):
     example_merged = defaultdict(list)

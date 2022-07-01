@@ -388,289 +388,338 @@ class VoxelNet(nn.Module):
             }
         """
 
-        total_scores_ = torch.sigmoid(preds_dict['cls_preds'])
-        top_scores_, top_labels_ = torch.max(
-                        total_scores_, dim=-1)
-
         batch_size = example['anchors'].shape[0]
 
-        scores_ = top_scores_.reshape((batch_size,-1))
-        labels_ = top_labels_.reshape((batch_size,-1))
-        box_preds_ = preds_dict['box_preds'].reshape((batch_size, -1, 7))
-
-        obj_type = np.array(example['type']).reshape(-1)
-        type_names = ['Car','Cyclist','Pedestrian']
-        obj_type = np.array(list(map(lambda x: type_names.index(x), obj_type)))
-
-        if "metadata" not in example or len(example["metadata"]) == 0:
-            meta_list = [None] * batch_size
-        else:
-            meta_list = example["metadata"]
-
-        #labels_ = 
-
-        print(scores_.shape)
-        print(labels_.shape)
-        print(box_preds_.shape)
-
-        ####################################################################
-
-
-        if "metadata" not in example or len(example["metadata"]) == 0:
-            meta_list = [None] * batch_size
-        else:
-            meta_list = example["metadata"]
-        batch_anchors = example["anchors"].view(batch_size, -1,
-                                                example["anchors"].shape[-1])
         if "anchors_mask" not in example:
             batch_anchors_mask = [None] * batch_size
         else:
             batch_anchors_mask = example["anchors_mask"].view(batch_size, -1)
 
-        t = time.time()
+        total_scores_ = torch.sigmoid(preds_dict['cls_preds'])
+        top_scores_, top_labels_ = torch.max(
+                        total_scores_, dim=-1)
+
+        scores_ = top_scores_.reshape((batch_size,-1))
+        labels_ = top_labels_.reshape((batch_size,-1))
+        box_preds_ = preds_dict['box_preds'].reshape((batch_size, -1, 7))
+
+        obj_types = np.array(example['type']).reshape(-1)
+        type_names = ['Car','Cyclist','Pedestrian']
+        obj_types = np.array(list(map(lambda x: type_names.index(x), obj_types)))
+
+        if "metadata" not in example or len(example["metadata"]) == 0:
+            meta_list = [None] * batch_size
+        else:
+            meta_list = example["metadata"]
+
         batch_box_preds = preds_dict["box_preds"]
-        batch_cls_preds = preds_dict["cls_preds"]
         batch_box_preds = batch_box_preds.view(batch_size, -1,
                                                self._box_coder.code_size)
-        num_class_with_bg = self._num_class
-        if not self._encode_background_as_zeros:
-            num_class_with_bg = self._num_class + 1
-
-        batch_cls_preds = batch_cls_preds.view(batch_size, -1,
-                                               num_class_with_bg)
+        batch_anchors = example["anchors"].view(batch_size, -1,
+                                                example["anchors"].shape[-1])
         batch_box_preds = self._box_coder.decode_torch(batch_box_preds,
                                                        batch_anchors)
-        if self._use_direction_classifier:
-            batch_dir_preds = preds_dict["dir_cls_preds"]
-            batch_dir_preds = batch_dir_preds.view(batch_size, -1,
-                                                   self._num_direction_bins)
-        else:
-            batch_dir_preds = [None] * batch_size
-
+        
         predictions_dicts = []
-        post_center_range = None
-        if len(self._post_center_range) > 0:
-            post_center_range = torch.tensor(
-                self._post_center_range,
-                dtype=batch_box_preds.dtype,
-                device=batch_box_preds.device).float()
-        for box_preds, cls_preds, dir_preds, a_mask, meta in zip(
-                batch_box_preds, batch_cls_preds, batch_dir_preds,
-                batch_anchors_mask, meta_list):
+        for scores, labels, box_preds, meta, obj_type, dir_preds, a_mask in zip(scores_, labels_, batch_box_preds, meta_list, obj_types, preds_dict["dir_cls_preds"].reshape((batch_size,-1,2)), batch_anchors_mask):
+            
             if a_mask is not None:
+                scores = scores[a_mask]
+                labels = labels[a_mask]
                 box_preds = box_preds[a_mask]
-                cls_preds = cls_preds[a_mask]
-            box_preds = box_preds.float()
-            cls_preds = cls_preds.float()
-            if self._use_direction_classifier:
-                if a_mask is not None:
-                    dir_preds = dir_preds[a_mask]
-                dir_labels = torch.max(dir_preds, dim=-1)[1]
-            if self._encode_background_as_zeros:
-                # this don't support softmax
-                assert self._use_sigmoid_score is True
-                total_scores = torch.sigmoid(cls_preds)
-            else:
-                # encode background as first element in one-hot vector
-                if self._use_sigmoid_score:
-                    total_scores = torch.sigmoid(cls_preds)[..., 1:]
-                else:
-                    total_scores = F.softmax(cls_preds, dim=-1)[..., 1:]
-            # Apply NMS in birdeye view
-            if self._use_rotate_nms:
-                nms_func = box_torch_ops.rotate_nms
-            else:
-                nms_func = box_torch_ops.nms
-            feature_map_size_prod = batch_box_preds.shape[
-                1] // self.target_assigner.num_anchors_per_location
-            if self._multiclass_nms:
-                assert self._encode_background_as_zeros is True
-                boxes_for_nms = box_preds[:, [0, 1, 3, 4, 6]]
-                if not self._use_rotate_nms:
-                    box_preds_corners = box_torch_ops.center_to_corner_box2d(
-                        boxes_for_nms[:, :2], boxes_for_nms[:, 2:4],
-                        boxes_for_nms[:, 4])
-                    boxes_for_nms = box_torch_ops.corner_to_standup_nd(
-                        box_preds_corners)
+                dir_preds = dir_preds[a_mask]
+            
+            mask_type = (labels == obj_type)
+            scores = scores[mask_type]
+            labels = labels[mask_type]
+            box_preds = box_preds[mask_type]
+            dir_preds = dir_preds[mask_type]
+            
+            max_score = torch.max(scores)
+            mask_score = (scores == max_score)
+            scores = scores[mask_score]
+            labels = labels[mask_score]
+            box_preds = box_preds[mask_score]
+            dir_preds = dir_preds[mask_score]
 
-                selected_boxes, selected_labels, selected_scores = [], [], []
-                selected_dir_labels = []
+            dir_labels = torch.max(dir_preds, dim=-1)[1]
+            anchors_range = self.target_assigner.anchors_range(type_names[obj_type])
+            class_dir_labels = dir_labels.view(-1)[anchors_range[0]:anchors_range[1]]
+            class_dir_labels = class_dir_labels.contiguous().view(-1)
+            period = (2 * np.pi / self._num_direction_bins)
+            dir_rot = box_torch_ops.limit_period(box_preds[..., 6] - self._dir_offset, self._dir_limit_offset, period)
+            box_preds[..., 6] = dir_rot + self._dir_offset + period * dir_labels.to(box_preds.dtype)
 
-                scores = total_scores
-                boxes = boxes_for_nms
-                selected_per_class = []
-                score_threshs = self._nms_score_thresholds
-                pre_max_sizes = self._nms_pre_max_sizes
-                post_max_sizes = self._nms_post_max_sizes
-                iou_thresholds = self._nms_iou_thresholds
-                for class_idx, score_thresh, pre_ms, post_ms, iou_th in zip(
-                        range(self._num_class),
-                        score_threshs,
-                        pre_max_sizes, post_max_sizes, iou_thresholds):
-                    if self._nms_class_agnostic:
-                        class_scores = total_scores.view(
-                            feature_map_size_prod, -1,
-                            self._num_class)[..., class_idx]
-                        class_scores = class_scores.contiguous().view(-1)
-                        class_boxes_nms = boxes.view(-1,
-                                                     boxes_for_nms.shape[-1])
-                        class_boxes = box_preds
-                        class_dir_labels = dir_labels
-                    else:
-                        anchors_range = self.target_assigner.anchors_range(class_idx)
-                        class_scores = total_scores.view(
-                            -1,
-                            self._num_class)[anchors_range[0]:anchors_range[1], class_idx]
-                        class_boxes_nms = boxes.view(-1,
-                            boxes_for_nms.shape[-1])[anchors_range[0]:anchors_range[1], :]
-                        class_scores = class_scores.contiguous().view(-1)
-                        class_boxes_nms = class_boxes_nms.contiguous().view(
-                            -1, boxes_for_nms.shape[-1])
-                        class_boxes = box_preds.view(-1,
-                            box_preds.shape[-1])[anchors_range[0]:anchors_range[1], :]
-                        class_boxes = class_boxes.contiguous().view(
-                            -1, box_preds.shape[-1])
-                        if self._use_direction_classifier:
-                            class_dir_labels = dir_labels.view(-1)[anchors_range[0]:anchors_range[1]]
-                            class_dir_labels = class_dir_labels.contiguous(
-                            ).view(-1)
-                    if score_thresh > 0.0:
-                        class_scores_keep = class_scores >= score_thresh
-                        if class_scores_keep.shape[0] == 0:
-                            selected_per_class.append(None)
-                            continue
-                        class_scores = class_scores[class_scores_keep]
-                    if class_scores.shape[0] != 0:
-                        if score_thresh > 0.0:
-                            class_boxes_nms = class_boxes_nms[
-                                class_scores_keep]
-                            class_boxes = class_boxes[class_scores_keep]
-                            class_dir_labels = class_dir_labels[
-                                class_scores_keep]
-                        keep = nms_func(class_boxes_nms, class_scores, pre_ms,
-                                        post_ms, iou_th)
-                        if keep.shape[0] != 0:
-                            selected_per_class.append(keep)
-                        else:
-                            selected_per_class.append(None)
-                    else:
-                        selected_per_class.append(None)
-                    selected = selected_per_class[-1]
 
-                    if selected is not None:
-                        selected_boxes.append(class_boxes[selected])
-                        selected_labels.append(
-                            torch.full([class_boxes[selected].shape[0]],
-                                       class_idx,
-                                       dtype=torch.int64,
-                                       device=box_preds.device))
-                        if self._use_direction_classifier:
-                            selected_dir_labels.append(
-                                class_dir_labels[selected])
-                        selected_scores.append(class_scores[selected])
-                selected_boxes = torch.cat(selected_boxes, dim=0)
-                selected_labels = torch.cat(selected_labels, dim=0)
-                selected_scores = torch.cat(selected_scores, dim=0)
-                if self._use_direction_classifier:
-                    selected_dir_labels = torch.cat(selected_dir_labels, dim=0)
-            else:
-                # get highest score per prediction, than apply nms
-                # to remove overlapped box.
-                if num_class_with_bg == 1:
-                    top_scores = total_scores.squeeze(-1)
-                    top_labels = torch.zeros(
-                        total_scores.shape[0],
-                        device=total_scores.device,
-                        dtype=torch.long)
-                else:
-                    top_scores, top_labels = torch.max(
-                        total_scores, dim=-1)
-                if self._nms_score_thresholds[0] > 0.0:
-                    top_scores_keep = top_scores >= self._nms_score_thresholds[0]
-                    top_scores = top_scores.masked_select(top_scores_keep)
 
-                if top_scores.shape[0] != 0:
-                    if self._nms_score_thresholds[0] > 0.0:
-                        box_preds = box_preds[top_scores_keep]
-                        if self._use_direction_classifier:
-                            dir_labels = dir_labels[top_scores_keep]
-                        top_labels = top_labels[top_scores_keep]
-                    boxes_for_nms = box_preds[:, [0, 1, 3, 4, 6]]
-                    if not self._use_rotate_nms:
-                        box_preds_corners = box_torch_ops.center_to_corner_box2d(
-                            boxes_for_nms[:, :2], boxes_for_nms[:, 2:4],
-                            boxes_for_nms[:, 4])
-                        boxes_for_nms = box_torch_ops.corner_to_standup_nd(
-                            box_preds_corners)
-                    # the nms in 3d detection just remove overlap boxes.
-                    selected = nms_func(
-                        boxes_for_nms,
-                        top_scores,
-                        pre_max_size=self._nms_pre_max_sizes[0],
-                        post_max_size=self._nms_post_max_sizes[0],
-                        iou_threshold=self._nms_iou_thresholds[0],
-                    )
-                else:
-                    selected = []
-                # if selected is not None:
-                selected_boxes = box_preds[selected]
-                if self._use_direction_classifier:
-                    selected_dir_labels = dir_labels[selected]
-                selected_labels = top_labels[selected]
-                selected_scores = top_scores[selected]
-            # finally generate predictions.
-            if selected_boxes.shape[0] != 0:
-                box_preds = selected_boxes
-                scores = selected_scores
-                label_preds = selected_labels
-                if self._use_direction_classifier:
-                    dir_labels = selected_dir_labels
-                    period = (2 * np.pi / self._num_direction_bins)
-                    dir_rot = box_torch_ops.limit_period(
-                        box_preds[..., 6] - self._dir_offset,
-                        self._dir_limit_offset, period)
-                    box_preds[
-                        ...,
-                        6] = dir_rot + self._dir_offset + period * dir_labels.to(
-                            box_preds.dtype)
-                final_box_preds = box_preds
-                final_scores = scores
-                final_labels = label_preds
-                if post_center_range is not None:
-                    mask = (final_box_preds[:, :3] >=
-                            post_center_range[:3]).all(1)
-                    mask &= (final_box_preds[:, :3] <=
-                             post_center_range[3:]).all(1)
-                    predictions_dict = {
-                        "box3d_lidar": final_box_preds[mask],#[0],
-                        "scores": final_scores[mask],#[0],
-                        "label_preds": label_preds[mask],#[0],
-                        "metadata": meta,
-                    }
-                else:
-                    predictions_dict = {
-                        "box3d_lidar": final_box_preds,
-                        "scores": final_scores,
-                        "label_preds": label_preds,
-                        "metadata": meta,
-                    }
-            else:
-                dtype = batch_box_preds.dtype
-                device = batch_box_preds.device
-                predictions_dict = {
-                    "box3d_lidar":
-                    torch.zeros([0, box_preds.shape[-1]],
-                                dtype=dtype,
-                                device=device),
-                    "scores":
-                    torch.zeros([0], dtype=dtype, device=device),
-                    "label_preds":
-                    torch.zeros([0], dtype=top_labels.dtype, device=device),
-                    "metadata":
-                    meta,
-                }
+            predictions_dict = {
+                "box3d_lidar": box_preds,
+                "scores": scores,
+                "label_preds": labels,
+                "metadata": meta,
+            }
             predictions_dicts.append(predictions_dict)
-        print(predictions_dicts[0].keys())
+        #print(predictions_dicts)
+
+        ####################################################################
+
+        # batch_size = example['anchors'].shape[0]
+
+        # if "metadata" not in example or len(example["metadata"]) == 0:
+        #     meta_list = [None] * batch_size
+        # else:
+        #     meta_list = example["metadata"]
+        # batch_anchors = example["anchors"].view(batch_size, -1,
+        #                                         example["anchors"].shape[-1])
+        # if "anchors_mask" not in example:
+        #     batch_anchors_mask = [None] * batch_size
+        # else:
+        #     batch_anchors_mask = example["anchors_mask"].view(batch_size, -1)
+
+        # batch_box_preds = preds_dict["box_preds"]
+        # batch_cls_preds = preds_dict["cls_preds"]
+        # batch_box_preds = batch_box_preds.view(batch_size, -1,
+        #                                        self._box_coder.code_size)
+        # num_class_with_bg = self._num_class
+        # if not self._encode_background_as_zeros:
+        #     num_class_with_bg = self._num_class + 1
+
+        # batch_cls_preds = batch_cls_preds.view(batch_size, -1,
+        #                                        num_class_with_bg)
+        # batch_box_preds = self._box_coder.decode_torch(batch_box_preds,
+        #                                                batch_anchors)
+        # if self._use_direction_classifier:
+        #     batch_dir_preds = preds_dict["dir_cls_preds"]
+        #     batch_dir_preds = batch_dir_preds.view(batch_size, -1,
+        #                                            self._num_direction_bins)
+        # else:
+        #     batch_dir_preds = [None] * batch_size
+
+        # predictions_dicts = []
+        # post_center_range = None
+        # if len(self._post_center_range) > 0:
+        #     post_center_range = torch.tensor(
+        #         self._post_center_range,
+        #         dtype=batch_box_preds.dtype,
+        #         device=batch_box_preds.device).float()
+        # for box_preds, cls_preds, dir_preds, a_mask, meta in zip(
+        #         batch_box_preds, batch_cls_preds, batch_dir_preds,
+        #         batch_anchors_mask, meta_list):
+        #     if a_mask is not None:
+        #         box_preds = box_preds[a_mask]
+        #         cls_preds = cls_preds[a_mask]
+        #     box_preds = box_preds.float()
+        #     cls_preds = cls_preds.float()
+        #     if self._use_direction_classifier:
+        #         if a_mask is not None:
+        #             dir_preds = dir_preds[a_mask]
+        #         dir_labels = torch.max(dir_preds, dim=-1)[1]
+        #     if self._encode_background_as_zeros:
+        #         # this don't support softmax
+        #         assert self._use_sigmoid_score is True
+        #         total_scores = torch.sigmoid(cls_preds)
+        #     else:
+        #         # encode background as first element in one-hot vector
+        #         if self._use_sigmoid_score:
+        #             total_scores = torch.sigmoid(cls_preds)[..., 1:]
+        #         else:
+        #             total_scores = F.softmax(cls_preds, dim=-1)[..., 1:]
+        #     # Apply NMS in birdeye view
+        #     if self._use_rotate_nms:
+        #         nms_func = box_torch_ops.rotate_nms
+        #     else:
+        #         nms_func = box_torch_ops.nms
+        #     feature_map_size_prod = batch_box_preds.shape[
+        #         1] // self.target_assigner.num_anchors_per_location
+        #     if self._multiclass_nms:
+        #         assert self._encode_background_as_zeros is True
+        #         boxes_for_nms = box_preds[:, [0, 1, 3, 4, 6]]
+        #         if not self._use_rotate_nms:
+        #             box_preds_corners = box_torch_ops.center_to_corner_box2d(
+        #                 boxes_for_nms[:, :2], boxes_for_nms[:, 2:4],
+        #                 boxes_for_nms[:, 4])
+        #             boxes_for_nms = box_torch_ops.corner_to_standup_nd(
+        #                 box_preds_corners)
+
+        #         selected_boxes, selected_labels, selected_scores = [], [], []
+        #         selected_dir_labels = []
+
+        #         scores = total_scores
+        #         boxes = boxes_for_nms
+        #         selected_per_class = []
+        #         score_threshs = self._nms_score_thresholds
+        #         pre_max_sizes = self._nms_pre_max_sizes
+        #         post_max_sizes = self._nms_post_max_sizes
+        #         iou_thresholds = self._nms_iou_thresholds
+        #         for class_idx, score_thresh, pre_ms, post_ms, iou_th in zip(
+        #                 range(self._num_class),
+        #                 score_threshs,
+        #                 pre_max_sizes, post_max_sizes, iou_thresholds):
+        #             if self._nms_class_agnostic:
+        #                 class_scores = total_scores.view(
+        #                     feature_map_size_prod, -1,
+        #                     self._num_class)[..., class_idx]
+        #                 class_scores = class_scores.contiguous().view(-1)
+        #                 class_boxes_nms = boxes.view(-1,
+        #                                              boxes_for_nms.shape[-1])
+        #                 class_boxes = box_preds
+        #                 class_dir_labels = dir_labels
+        #             else:
+        #                 anchors_range = self.target_assigner.anchors_range(class_idx)
+        #                 class_scores = total_scores.view(
+        #                     -1,
+        #                     self._num_class)[anchors_range[0]:anchors_range[1], class_idx]
+        #                 class_boxes_nms = boxes.view(-1,
+        #                     boxes_for_nms.shape[-1])[anchors_range[0]:anchors_range[1], :]
+        #                 class_scores = class_scores.contiguous().view(-1)
+        #                 class_boxes_nms = class_boxes_nms.contiguous().view(
+        #                     -1, boxes_for_nms.shape[-1])
+        #                 class_boxes = box_preds.view(-1,
+        #                     box_preds.shape[-1])[anchors_range[0]:anchors_range[1], :]
+        #                 class_boxes = class_boxes.contiguous().view(
+        #                     -1, box_preds.shape[-1])
+        #                 if self._use_direction_classifier:
+        #                     class_dir_labels = dir_labels.view(-1)[anchors_range[0]:anchors_range[1]]
+        #                     class_dir_labels = class_dir_labels.contiguous(
+        #                     ).view(-1)
+        #             if score_thresh > 0.0:
+        #                 class_scores_keep = class_scores >= score_thresh
+        #                 if class_scores_keep.shape[0] == 0:
+        #                     selected_per_class.append(None)
+        #                     continue
+        #                 class_scores = class_scores[class_scores_keep]
+        #             if class_scores.shape[0] != 0:
+        #                 if score_thresh > 0.0:
+        #                     class_boxes_nms = class_boxes_nms[
+        #                         class_scores_keep]
+        #                     class_boxes = class_boxes[class_scores_keep]
+        #                     class_dir_labels = class_dir_labels[
+        #                         class_scores_keep]
+        #                 keep = nms_func(class_boxes_nms, class_scores, pre_ms,
+        #                                 post_ms, iou_th)
+        #                 if keep.shape[0] != 0:
+        #                     selected_per_class.append(keep)
+        #                 else:
+        #                     selected_per_class.append(None)
+        #             else:
+        #                 selected_per_class.append(None)
+        #             selected = selected_per_class[-1]
+
+        #             if selected is not None:
+        #                 selected_boxes.append(class_boxes[selected])
+        #                 selected_labels.append(
+        #                     torch.full([class_boxes[selected].shape[0]],
+        #                                class_idx,
+        #                                dtype=torch.int64,
+        #                                device=box_preds.device))
+        #                 if self._use_direction_classifier:
+        #                     selected_dir_labels.append(
+        #                         class_dir_labels[selected])
+        #                 selected_scores.append(class_scores[selected])
+        #         selected_boxes = torch.cat(selected_boxes, dim=0)
+        #         selected_labels = torch.cat(selected_labels, dim=0)
+        #         selected_scores = torch.cat(selected_scores, dim=0)
+        #         if self._use_direction_classifier:
+        #             selected_dir_labels = torch.cat(selected_dir_labels, dim=0)
+        #     else:
+        #         # get highest score per prediction, than apply nms
+        #         # to remove overlapped box.
+        #         if num_class_with_bg == 1:
+        #             top_scores = total_scores.squeeze(-1)
+        #             top_labels = torch.zeros(
+        #                 total_scores.shape[0],
+        #                 device=total_scores.device,
+        #                 dtype=torch.long)
+        #         else:
+        #             top_scores, top_labels = torch.max(
+        #                 total_scores, dim=-1)
+        #         if self._nms_score_thresholds[0] > 0.0:
+        #             top_scores_keep = top_scores >= self._nms_score_thresholds[0]
+        #             top_scores = top_scores.masked_select(top_scores_keep)
+
+        #         if top_scores.shape[0] != 0:
+        #             if self._nms_score_thresholds[0] > 0.0:
+        #                 box_preds = box_preds[top_scores_keep]
+        #                 if self._use_direction_classifier:
+        #                     dir_labels = dir_labels[top_scores_keep]
+        #                 top_labels = top_labels[top_scores_keep]
+        #             boxes_for_nms = box_preds[:, [0, 1, 3, 4, 6]]
+        #             if not self._use_rotate_nms:
+        #                 box_preds_corners = box_torch_ops.center_to_corner_box2d(
+        #                     boxes_for_nms[:, :2], boxes_for_nms[:, 2:4],
+        #                     boxes_for_nms[:, 4])
+        #                 boxes_for_nms = box_torch_ops.corner_to_standup_nd(
+        #                     box_preds_corners)
+        #             # the nms in 3d detection just remove overlap boxes.
+        #             selected = nms_func(
+        #                 boxes_for_nms,
+        #                 top_scores,
+        #                 pre_max_size=self._nms_pre_max_sizes[0],
+        #                 post_max_size=self._nms_post_max_sizes[0],
+        #                 iou_threshold=self._nms_iou_thresholds[0],
+        #             )
+        #         else:
+        #             selected = []
+        #         # if selected is not None:
+        #         selected_boxes = box_preds[selected]
+        #         if self._use_direction_classifier:
+        #             selected_dir_labels = dir_labels[selected]
+        #         selected_labels = top_labels[selected]
+        #         selected_scores = top_scores[selected]
+        #     # finally generate predictions.
+        #     if selected_boxes.shape[0] != 0:
+        #         box_preds = selected_boxes
+        #         scores = selected_scores
+        #         label_preds = selected_labels
+        #         if self._use_direction_classifier:
+        #             dir_labels = selected_dir_labels
+        #             period = (2 * np.pi / self._num_direction_bins)
+        #             dir_rot = box_torch_ops.limit_period(
+        #                 box_preds[..., 6] - self._dir_offset,
+        #                 self._dir_limit_offset, period)
+        #             box_preds[
+        #                 ...,
+        #                 6] = dir_rot + self._dir_offset + period * dir_labels.to(
+        #                     box_preds.dtype)
+        #         final_box_preds = box_preds
+        #         final_scores = scores
+        #         final_labels = label_preds
+        #         if post_center_range is not None:
+        #             mask = (final_box_preds[:, :3] >=
+        #                     post_center_range[:3]).all(1)
+        #             mask &= (final_box_preds[:, :3] <=
+        #                      post_center_range[3:]).all(1)
+        #             predictions_dict = {
+        #                 "box3d_lidar": final_box_preds[mask],#[0],
+        #                 "scores": final_scores[mask],#[0],
+        #                 "label_preds": label_preds[mask],#[0],
+        #                 "metadata": meta,
+        #             }
+        #         else:
+        #             predictions_dict = {
+        #                 "box3d_lidar": final_box_preds,
+        #                 "scores": final_scores,
+        #                 "label_preds": label_preds,
+        #                 "metadata": meta,
+        #             }
+        #     else:
+        #         dtype = batch_box_preds.dtype
+        #         device = batch_box_preds.device
+        #         predictions_dict = {
+        #             "box3d_lidar":
+        #             torch.zeros([0, box_preds.shape[-1]],
+        #                         dtype=dtype,
+        #                         device=device),
+        #             "scores":
+        #             torch.zeros([0], dtype=dtype, device=device),
+        #             "label_preds":
+        #             torch.zeros([0], dtype=top_labels.dtype, device=device),
+        #             "metadata":
+        #             meta,
+        #         }
+        #     predictions_dicts.append(predictions_dict)
+        # print(predictions_dicts)
+        # print("-----------")
         return predictions_dicts
 
     def metrics_to_float(self):
